@@ -1,0 +1,161 @@
+---
+title: "Reproducible Research Peer Assessment 1"
+output: 
+  html_document:
+    keep_md: true
+---
+
+
+## Loading and preprocessing the data
+
+
+Reading the data into "data" data frame and show the structure and summary 
+
+```{r read_data, cache=TRUE}
+data<-read.csv("activity.csv", stringsAsFactors=FALSE)
+str(data)
+summary(data)
+```
+
+Convert date to POSIXct class
+
+```{r date_conversion, message=FALSE}
+library(lubridate)
+data$date <- ymd(data$date)
+str(data)
+```
+
+
+## Calculate the total number of steps taken per day ignoring the missing values
+```{r daily_total,message=FALSE}
+require(dplyr)
+total_day <- data %>% group_by(date) %>%summarise(total_steps=sum(steps,na.rm=TRUE),na=mean(is.na(steps))) %>% print
+```
+Visualise the total number of steps taken per day as a barplot
+
+```{r barplot,fig.width=12}
+barplot(height = total_day$total_steps,names.arg=total_day$date,cex.names=0.68,las=3,col="red")
+abline(h=median(total_day$total_steps), lty=2,lwd=3, col="black")
+abline(h=mean(total_day$total_steps), lty=2,lwd=3, col="blue")
+text(x = 0,y=median(total_day$total_steps),pos=3,labels = "median")
+text(x = 0,y=mean(total_day$total_steps),pos=1,labels = "mean",col="blue")
+```
+
+##Histogram of the total number of steps taken each day
+
+```{r histogram}
+total_day <- filter(total_day, na < 1)
+hist(total_day$total_steps,col="grey",breaks=20,main="Total steps per day",xlab="Steps per day")
+abline(v=median(total_day$total_steps),lty=3, lwd=2, col="black")
+legend(legend="median","topright",lty=3,lwd=2,bty = "n")
+```
+
+##Calculate and report the mean and median of the total number of steps taken per day
+
+```{r summary}
+mean_steps <- mean(total_day$total_steps,na.rm=TRUE)
+median_steps <- median(total_day$total_steps,na.rm=TRUE)
+mean_steps
+median_steps
+```
+
+##Average daily data pattern
+
+##Make a time series plot   
+
+```{r daily, fig.width=12}
+library(dplyr,quietly = TRUE)
+daily_patterns <- data %>% group_by(interval) %>% summarise(average=mean(steps,na.rm=TRUE))
+plot(x = 1:nrow(daily_patterns),y = daily_patterns$average,type = "l",
+     col = "yellow", xaxt = "n",xlab="Intervals", 
+     ylab = "Average for given interval across all days")
+axis(1,labels=daily_patterns$interval[seq(1,288,12)],
+     at = seq_along(daily_patterns$interval)[seq(1,288,12)])
+```
+
+##Highest steps interval
+```{r highest}
+max_numb_steps_interval <- filter(daily_patterns,average==max(average))
+max_numb_steps_interval
+```
+
+
+## Imputing missing values
+
+##Calculate and report the total number of missing values in the dataset 
+
+```{r missing}
+na_number <- sum(is.na(data$steps))
+na_number
+percentage_na <- mean(is.na(data$steps))
+percentage_na
+```
+
+##Devise a strategy for filling in all of the missing values in the dataset
+
+We impute missing values based on average number of steps in particular 5-minutes interval. 
+
+#### 3. Create a new dataset that is equal to the original dataset but with the missing data filled in.
+```{r na_imputing, cache=TRUE}
+without_NAs <- numeric(nrow(data))
+for (i in 1:nrow(data))
+{
+        if (is.na(data[i,"steps"])==TRUE)
+            {
+                    without_NAs[i]<-filter(daily_patterns,interval==data[i,"interval"]) %>% select(average)
+            } 
+        else
+            {
+                    without_NAs[i]<-data[i,"steps"]
+            }
+                    
+}
+data_without_NAs<-mutate(data,steps_no_NAs=without_NAs)
+head(data_without_NAs)
+```
+
+Below code is just to verify if process of imputing missing values correctly preserved original values (lines with no NAs)   
+```{r test_NAs}
+check <- filter(data_without_NAs,!is.na(steps)) %>% mutate(ok = (steps==steps_no_NAs))
+mean(check$ok)
+```
+
+##Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day
+
+```{r histogram_no_NAs}
+total_day_noNAs <- data_without_NAs %>% mutate(steps_no_NAs=as.numeric(steps_no_NAs)) %>% group_by(date) %>% summarise(total_steps=sum(steps_no_NAs))
+hist(total_day_noNAs$total_steps,col="red",breaks=20,main="Total steps per day",xlab="Steps per day")
+abline(v=median(total_day$total_steps),lty=3, lwd=2, col="black")
+legend(legend="median","topright",lty=3,lwd=2,bty = "n")
+```
+
+```{r summary_no_NAs}
+summary(total_day_noNAs$total_steps)
+```
+
+Imputing missing values, mean of the total number of steps taken per day  increased while median decreased,compared to estimates from the first part (ingoring missing values). Imputing missing data resulted in increase of total daily number of steps (instead of each NAs we have average that is always >=0)
+
+## Are there differences in data patterns between weekdays and weekends?
+
+## 1. Create a new factor variable in the dataset with two levels - "weekday" and "weekend" indicating whether a given date is a weekday or weekend day
+
+```{r weekday}
+library(lubridate)
+is_weekday <-function(date){
+        if(wday(date)%in%c(1,7)) result<-"weekend"
+        else
+                result<-"weekday"
+        result
+}
+data_without_NAs <- mutate(data_without_NAs,date=ymd(date)) %>% mutate(day=sapply(date,is_weekday))
+table(data_without_NAs$day)
+```
+
+##Panel plot containing a time series plot of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis)
+
+
+```{r weekend_comparison, cache=TRUE, fig.width=10}
+library(ggplot2)
+daily_patterns <- data_without_NAs %>% mutate(day=factor(day,levels=c("weekend","weekday")),steps_no_NAs=as.numeric(steps_no_NAs)) %>% group_by(interval,day) %>% summarise(average=mean(steps_no_NAs))
+qplot(interval,average,data=daily_patterns,geom="line",facets=day~.)
+```
